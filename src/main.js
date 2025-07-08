@@ -33,16 +33,42 @@ export default async ({ req, res, log, error }) => {
   try {
     // Parse input
     const {
-      walletType,
-      blockchain,
-      mnemonic,
-      walletPassword,
-      walletName,
-      derivationPath
+      walletType,        // 'inbuilt', 'imported', 'external'
+      blockchain,        // 'bitcoin', 'ethereum', etc.
+      mnemonic,          // optional, for import
+      walletPassword,    // required for inbuilt/imported
+      walletName,        // required
+      derivationPath,    // optional
+      walletAddress,     // required for external
+      publicKey          // optional for external
     } = req.body ? JSON.parse(req.body) : {}
 
-    if (!walletType || !blockchain || !walletPassword || !walletName) {
+    // Validate walletType
+    if (!walletType || !['inbuilt', 'imported', 'external'].includes(walletType)) {
+      return res.json({ error: 'Invalid or missing walletType' }, 400)
+    }
+    if (!blockchain || !walletName) {
       return res.json({ error: 'Missing required fields' }, 400)
+    }
+
+    // Handle external wallet (address only, no private key)
+    if (walletType === 'external') {
+      if (!walletAddress) {
+        return res.json({ error: 'walletAddress required for external wallet' }, 400)
+      }
+      return res.json({
+        walletAddress,
+        publicKey: publicKey || null,
+        encryptedPrivateKey: null,
+        derivationPath: null,
+        mnemonic: null,
+        creationMethod: 'external'
+      })
+    }
+
+    // For inbuilt/imported, walletPassword is required
+    if (!walletPassword) {
+      return res.json({ error: 'walletPassword required' }, 400)
     }
 
     // Helper: AES-256-GCM encryption
@@ -66,8 +92,11 @@ export default async ({ req, res, log, error }) => {
     if (blockchain === 'bitcoin') {
       // Bitcoin wallet
       let usedMnemonic = mnemonic
-      if (!mnemonic) {
+      if (walletType === 'inbuilt' && !mnemonic) {
         usedMnemonic = bip39.generateMnemonic()
+      }
+      if (!usedMnemonic) {
+        return res.json({ error: 'mnemonic required for imported wallet' }, 400)
       }
       const seed = await bip39.mnemonicToSeed(usedMnemonic)
       const path = derivationPath || "m/84'/0'/0'/0/0"
@@ -79,14 +108,18 @@ export default async ({ req, res, log, error }) => {
         publicKey: child.publicKey.toString('hex'),
         encryptedPrivateKey: encrypt(child.toWIF(), walletPassword),
         derivationPath: path,
-        mnemonic: walletType === 'imported' ? usedMnemonic : undefined
+        mnemonic: walletType === 'imported' ? usedMnemonic : undefined,
+        creationMethod: walletType
       }
-    } else {
-      // Ethereum-like wallet
+    } else if (blockchain === 'ethereum') {
+      // Ethereum wallet
       let usedMnemonic = mnemonic
       let path = derivationPath || "m/44'/60'/0'/0/0"
-      if (!mnemonic) {
+      if (walletType === 'inbuilt' && !mnemonic) {
         usedMnemonic = ethers.Wallet.createRandom().mnemonic.phrase
+      }
+      if (!usedMnemonic) {
+        return res.json({ error: 'mnemonic required for imported wallet' }, 400)
       }
       const wallet = ethers.Wallet.fromMnemonic(usedMnemonic, path)
       result = {
@@ -94,8 +127,11 @@ export default async ({ req, res, log, error }) => {
         publicKey: wallet.publicKey,
         encryptedPrivateKey: encrypt(wallet.privateKey, walletPassword),
         derivationPath: path,
-        mnemonic: walletType === 'imported' ? usedMnemonic : undefined
+        mnemonic: walletType === 'imported' ? usedMnemonic : undefined,
+        creationMethod: walletType
       }
+    } else {
+      return res.json({ error: 'Unsupported blockchain' }, 400)
     }
 
     // Never store mnemonic, only return if imported and user requests
@@ -104,7 +140,8 @@ export default async ({ req, res, log, error }) => {
       publicKey: result.publicKey,
       encryptedPrivateKey: result.encryptedPrivateKey,
       derivationPath: result.derivationPath,
-      mnemonic: result.mnemonic // Only for imported
+      mnemonic: result.mnemonic,
+      creationMethod: result.creationMethod
     })
   } catch (err) {
     error('Wallet creation failed: ' + (err.message || err))
