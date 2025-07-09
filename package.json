@@ -8,6 +8,9 @@
     "format": "prettier --write ."
   },
   "dependencies": {
+    "bip39": "^3.1.0",
+    "bitcoinjs-lib": "^6.1.7",
+    "ethers": "^6.15.0",
     "node-appwrite": "^14.1.0"
   },
   "devDependencies": {
