@@ -41,7 +41,7 @@ export default async ({ req, res, log, error }) => {
       derivationPath,    // optional
       walletAddress,     // required for external
       publicKey          // optional for external
-    } = req.body ? JSON.parse(req.body) : {}
+    } = req.bodyJson || {}
 
     // Validate walletType
     if (!walletType || !['inbuilt', 'imported', 'external'].includes(walletType)) {
